@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InstalKalk - Kalkulátor pro topenáře</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vue.js 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Ikony -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans">
+    <div id="app" class="max-w-6xl mx-auto p-4 lg:p-8">
+        
+        <header class="flex justify-between items-center bg-blue-600 text-white p-6 rounded-lg shadow-md mb-8">
+            <h1 class="text-3xl font-bold"><i class="fas fa-tools mr-3"></i>InstalKalk</h1>
+            <div>Moderní tvorba rozpočtů a nabídek</div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+            
+            <!-- Boční panel: Nový projekt a Seznam projektů -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-4">Projekty</h2>
+                
+                <div class="flex flex-col gap-2 mb-6">
+                    <input v-model="newProjectName" type="text" placeholder="Název projektu" class="border p-2 rounded">
+                    <button @click="createProject" class="bg-green-600 hover:bg-green-700 text-white p-2 rounded transition">
+                        <i class="fas fa-plus mr-1"></i> Přidat projekt
+                    </button>
+                </div>
+
+                <div class="overflow-y-auto max-h-96">
+                    <ul class="space-y-2">
+                        <li v-for="proj in projects" :key="proj.id" 
+                            @click="selectProject(proj)"
+                            :class="['p-3 rounded cursor-pointer border', activeProject?.id === proj.id ? 'bg-blue-50 border-blue-400' : 'hover:bg-slate-50']">
+                            <span class="font-medium">{{ proj.name }}</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Hlavní panel: Detail kalkulace a Vyhledávání -->
+            <div class="md:col-span-3 bg-white p-6 rounded-lg shadow-md" v-if="activeProject">
+                
+                <div class="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 class="text-2xl font-bold text-blue-700">{{ activeProject.name }}</h2>
+                    <div class="space-x-2">
+                        <a :href="'/api/export/word/' + activeProject.id" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
+                            <i class="fas fa-file-word mr-1"></i> Export Word
+                        </a>
+                        <a :href="'/api/export/excel/' + activeProject.id" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition">
+                            <i class="fas fa-file-excel mr-1"></i> Export Excel
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Vyhledávání Materiálu -->
+                <div class="bg-slate-50 p-4 rounded-lg border mb-6">
+                    <label class="block font-semibold mb-2">Hledat materiál z eshopů:</label>
+                    <div class="flex gap-2">
+                        <input v-model="searchQuery" @keyup.enter="searchProducts" type="text" placeholder="Např.: Odbočka T-kus 150-150-150 nebo Koleno 110° PVC" class="border p-2 rounded flex-1">
+                        <button @click="searchProducts" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition">
+                            <i class="fas fa-search"></i> Hledat
+                        </button>
+                    </div>
+                    
+                    <!-- Výsledek vyhledávání -->
+                    <div v-if="searchResults.length > 0" class="mt-4 border rounded bg-white">
+                        <table class="w-full text-left bg-white rounded">
+                            <thead class="bg-slate-100 border-b">
+                                <tr>
+                                    <th class="p-2 w-16">Foto</th>
+                                    <th class="p-2">Produkt</th>
+                                    <th class="p-2">E-shop</th>
+                                    <th class="p-2">Cena/ks</th>
+                                    <th class="p-2">Akce</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="res in paginatedSearchResults" :key="res.url" class="border-b">
+                                    <td class="p-2">
+                                        <img v-if="res.image_url" :src="res.image_url" 
+                                             class="w-10 h-10 object-cover rounded cursor-pointer hover:opacity-80 transition"
+                                             @click="openImageModal(res.image_url)" title="Kliknutím zvětšit">
+                                        <div v-else class="w-10 h-10 bg-gray-200 rounded flex items-center justify-center text-xs text-gray-400">Bez <br>foto</div>
+                                    </td>
+                                    <td class="p-2 text-sm">{{ res.name }}</td>
+                                    <td class="p-2 text-sm font-semibold text-gray-600">{{ res.shop }}</td>
+                                    <td class="p-2 text-sm">{{ res.price }} Kč</td>
+                                    <td class="p-2">
+                                        <button @click="addItem(res)" class="bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200 text-sm font-semibold">
+                                            + Přidat položku
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <!-- Stránkování výsledků -->
+                        <div v-if="totalPages > 1" class="flex justify-between items-center p-3 bg-slate-50 border-t">
+                            <button @click="prevPage" :disabled="searchPage === 1" 
+                                    class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">
+                                <i class="fas fa-chevron-left"></i> Předchozí
+                            </button>
+                            <span class="text-sm font-semibold">Stránka {{ searchPage }} z {{ totalPages }}</span>
+                            <button @click="nextPage" :disabled="searchPage === totalPages" 
+                                    class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">
+                                Další <i class="fas fa-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modál pro velký obrázek -->
+                <div v-if="selectedImage" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4" @click="selectedImage = null">
+                    <div class="relative bg-white rounded-lg p-2 max-w-2xl max-h-full" @click.stop>
+                        <button @click="selectedImage = null" class="absolute -top-3 -right-3 bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-700 hover:scale-110 transition shadow-lg w-auto h-auto px-2">
+                            <i class="fas fa-times"></i> Zavřít
+                        </button>
+                        <img :src="selectedImage" class="max-w-full max-h-[80vh] rounded">
+                    </div>
+                </div>
+
+                <!-- Tabulka položek kalkulace -->
+                <div>
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-semibold">Položky projektu</h3>
+                        <!-- FILTROVÁNÍ -->
+                        <div class="flex items-center gap-2">
+                            <label class="font-medium text-gray-700"><i class="fas fa-filter text-sm"></i> Filtr:</label>
+                            <select v-model="selectedCategory" class="border p-2 rounded bg-white shadow-sm font-medium">
+                                <option value="Vše">Zobrazit vše</option>
+                                <option value="Trubky">Trubky</option>
+                                <option value="Kolena">Kolena</option>
+                                <option value="T-kusy">T-kusy</option>
+                                <option value="Ostatní">Ostatní</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left mb-4">
+                            <thead class="bg-slate-800 text-white">
+                                <tr>
+                                    <th class="p-3 rounded-tl">Název</th>
+                                    <th class="p-3">Obchod</th>
+                                    <th class="p-3">Množství</th>
+                                    <th class="p-3">Cena/ks</th>
+                                    <th class="p-3">Celkem</th>
+                                    <th class="p-3 rounded-tr">Odebrat</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-if="filteredItems.length === 0">
+                                    <td colspan="6" class="p-4 text-center text-gray-500">
+                                        Pro tento filtr nejsou žádné položky (nebo je projekt zatím prázdný).
+                                    </td>
+                                </tr>
+                                <tr v-for="item in filteredItems" :key="item.id" class="border-b hover:bg-slate-50 transition">
+                                    <td class="p-3">{{ item.name }}</td>
+                                    <td class="p-3 text-sm text-gray-600">{{ item.shop }}</td>
+                                    <td class="p-3">
+                                        <!-- Do budoucna: Možnost reálné aktualizace -->
+                                        <span class="font-bold border px-2 py-1 rounded bg-white">{{ item.quantity }} x</span>
+                                    </td>
+                                    <td class="p-3">{{ item.price.toFixed(2) }} Kč</td>
+                                    <td class="p-3 font-semibold">{{ (item.price * item.quantity).toFixed(2) }} Kč</td>
+                                    <td class="p-3">
+                                        <button @click="deleteItem(item.id)" class="text-red-500 hover:text-red-700"><i class="fas fa-trash"></i></button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Součty -->
+                    <div class="flex justify-end mt-4">
+                        <div class="bg-slate-100 p-4 border rounded mt-4 w-64">
+                            <div class="flex justify-between mb-2">
+                                <span>Mezisoučet:</span>
+                                <span>{{ totalWithoutVat.toFixed(2) }} Kč</span>
+                            </div>
+                            <div class="flex justify-between mb-2 text-gray-600 text-sm border-b pb-2">
+                                <span>DPH (21%):</span>
+                                <span>{{ (totalWithoutVat * 0.21).toFixed(2) }} Kč</span>
+                            </div>
+                            <div class="flex justify-between font-bold text-xl mt-2">
+                                <span>Celkem:</span>
+                                <span class="text-blue-700">{{ (totalWithoutVat * 1.21).toFixed(2) }} Kč</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Prázdný stav -->
+            <div v-else class="md:col-span-3 bg-white p-6 rounded-lg shadow-md flex items-center justify-center text-gray-400">
+                <div class="text-center">
+                    <i class="fas fa-folder-open text-4xl mb-4"></i>
+                    <p>Začněte výběrem projektu vlevo nebo vytvořte nový.</p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Vue Aplikace - Skript -->
+    <script>
+        const { createApp, ref, computed, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const projects = ref([]);
+                const activeProject = ref(null);
+                const newProjectName = ref('');
+                const items = ref([]);
+                
+                // --- FILTR PŘIDÁN SEM ---
+                const selectedCategory = ref('Vše');
+                
+                const searchQuery = ref('');
+                const searchResults = ref([]);
+                
+                // Pagination & Modal state
+                const searchPage = ref(1);
+                const itemsPerPage = 5;
+                const selectedImage = ref(null);
+
+                // Načíst projekty
+                const loadProjects = async () => {
+                    const res = await fetch('/api/projects');
+                    projects.value = await res.json();
+                };
+
+                // Vytvořit nový projekt
+                const createProject = async () => {
+                    if (!newProjectName.value) return;
+                    const res = await fetch('/api/projects', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: newProjectName.value })
+                    });
+                    
+                    if (res.ok) {
+                        const newProject = await res.json();
+                        newProjectName.value = '';
+                        await loadProjects();
+                        // Automaticky vybrat právě vytvořený projekt
+                        selectProject(newProject);
+                    }
+                };
+
+                // Zvolit projekt a načíst položky
+                const selectProject = async (proj) => {
+                    activeProject.value = proj;
+                    searchResults.value = [];
+                    await loadItems(proj.id);
+                };
+
+                // Načíst položky pro vybraný projekt
+                const loadItems = async (projectId) => {
+                    const res = await fetch(`/api/projects/${projectId}/items`);
+                    items.value = await res.json();
+                };
+
+                // Hledat produkty v "eshopech"
+                const searchProducts = async () => {
+                    if (!searchQuery.value) return;
+                    const res = await fetch('/api/search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ query: searchQuery.value })
+                    });
+                    searchResults.value = await res.json();
+                    searchPage.value = 1; // Resetovat stránku při novém hledání
+                };
+
+                // Přidat nalezený předmět do rozpočtu s promptem pro množství
+                const addItem = async (product) => {
+                    let qtyStr = prompt(`Kolik kusů chcete přidat?\nProdukt: ${product.name}`, "1");
+                    if (qtyStr === null) return; // Uživatel zrušil prompt
+                    
+                    let qty = parseFloat(qtyStr);
+                    if (isNaN(qty) || qty <= 0) {
+                        alert("Neplatné množství!");
+                        return;
+                    }
+
+                    try {
+                        const res = await fetch('/api/items', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                project_id: activeProject.value.id,
+                                name: product.name,
+                                quantity: qty,
+                                price: product.price,
+                                shop: product.shop,
+                                url: product.url || "#" // Pojistka na url
+                            })
+                        });
+                        
+                        if(res.ok) {
+                            // Okamžitá vizuální aktualizace bez nutnosti refreshování
+                            await loadItems(activeProject.value.id);
+                        } else {
+                            alert("Chyba ze serveru: Položku se nepodařilo přidat do databáze.");
+                        }
+                    } catch (error) {
+                        alert("Chyba při komunikaci! Měli jste aplikaci otevřít přes .exe, nikoliv jen HTML soubor.");
+                        console.error(error);
+                    }
+                };
+
+                // Odstranit položku z DB
+                const deleteItem = async (itemId) => {
+                    if (confirm("Opravdu chcete položku smazat?")) {
+                        await fetch(`/api/items/${itemId}`, { method: 'DELETE' });
+                        await loadItems(activeProject.value.id);
+                    }
+                };
+
+                // Počítané vlastnosti (Automatický výpočet)
+                const totalWithoutVat = computed(() => {
+                    // Počítá součet VŠECH položek v projektu bez ohledu na filtr
+                    return items.value.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                });
+                
+                // Helper pro určení kategorie předmětu podle názvu
+                const getItemCategory = (name) => {
+                    const n = name.toLowerCase();
+                    if (n.includes('trubka') || n.includes('trubku') || n.includes('potrubí')) return 'Trubky';
+                    if (n.includes('koleno')) return 'Kolena';
+                    if (n.includes('t-kus') || n.includes('odbočk')) return 'T-kusy';
+                    return 'Ostatní';
+                };
+
+                // Zobrazené položky skrz filtr
+                const filteredItems = computed(() => {
+                    if (selectedCategory.value === 'Vše') return items.value;
+                    return items.value.filter(item => getItemCategory(item.name) === selectedCategory.value);
+                });
+
+                // Stránkování výsledků hledání
+                const totalPages = computed(() => {
+                    return Math.ceil(searchResults.value.length / itemsPerPage);
+                });
+
+                const paginatedSearchResults = computed(() => {
+                    const start = (searchPage.value - 1) * itemsPerPage;
+                    return searchResults.value.slice(start, start + itemsPerPage);
+                });
+
+                const nextPage = () => {
+                    if (searchPage.value < totalPages.value) searchPage.value++;
+                };
+
+                const prevPage = () => {
+                    if (searchPage.value > 1) searchPage.value--;
+                };
+                
+                const openImageModal = (url) => {
+                    selectedImage.value = url;
+                };
+
+                onMounted(() => {
+                    loadProjects();
+                });
+
+                return {
+                    projects, activeProject, newProjectName, items,
+                    searchQuery, searchResults, selectedCategory, filteredItems,
+                    searchPage, totalPages, paginatedSearchResults, selectedImage,
+                    loadProjects, createProject, selectProject,
+                    searchProducts, addItem, deleteItem,
+                    nextPage, prevPage, openImageModal,
+                    totalWithoutVat
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

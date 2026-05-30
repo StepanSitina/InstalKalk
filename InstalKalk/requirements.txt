@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+python-docx
+openpyxl
+pydantic
+jinja2
+beautifulsoup4
+requests
